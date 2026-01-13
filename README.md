@@ -30,7 +30,7 @@ pip install whisperkey
 ```bash
 git clone https://github.com/Danielratmiroff/whisper-key.git
 cd whisper-key
-poetry install # or pip install poetry 
+uv sync  # Install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## ⚙️ Configuration
