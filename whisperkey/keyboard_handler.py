@@ -5,8 +5,9 @@ from typing import Callable
 
 class KeyboardHandler:
     # Keyboard shortcut configuration
-    START_STOP_KEYS = {keyboard.Key.alt_l,
-                       keyboard.KeyCode.from_char('g')}  # Alt+G
+    START_STOP_KEYS = {keyboard.Key.ctrl_l,
+                       keyboard.Key.alt_l,
+                       keyboard.KeyCode.from_char('g')}  # Ctrl+Alt+G
 
     def __init__(self, toggle_recording_callback: Callable):
         """Initialize the keyboard handler."""

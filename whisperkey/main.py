@@ -191,11 +191,11 @@ class WhisperKey:
 
         show_notification(
             "Recording Started",
-            "Press Alt+G to stop recording",
+            "Press Ctrl+Alt+G to stop recording",
             "audio-input-microphone",
             urgency=notify2.URGENCY_NORMAL
         )
-        print("Recording started. Press Alt+G to stop.")
+        print("Recording started. Press Ctrl+Alt+G to stop.")
 
     def _record_audio(self):
         """Record audio until stopped or time limit reached."""
@@ -317,13 +317,13 @@ class WhisperKey:
         # Inform the user about the shortcut
         show_notification(
             "WhisperKey Active",
-            "Press Alt+G to start/stop recording",
+            "Press Ctrl+Alt+G to start/stop recording",
             "dialog-information",
             urgency=notify2.URGENCY_LOW
         )
 
         print("WhisperKey is running in the background.")
-        print("Press Alt+G to start/stop recording.")
+        print("Press Ctrl+Alt+G to start/stop recording.")
 
         # Keep the main thread alive
         try:
