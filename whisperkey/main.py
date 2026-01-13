@@ -17,6 +17,7 @@ from whisperkey.keyboard_handler import KeyboardHandler
 from whisperkey.utils import show_notification, suppress_stderr
 from whisperkey.file_handler import FileHandler
 from whisperkey.config import AUDIO_CONFIG
+from whisperkey.tray_icon import TrayIcon
 
 
 class WhisperKey:
@@ -47,6 +48,9 @@ class WhisperKey:
 
         # Initialize OpenAI client
         self.client = OpenAI()
+
+        # Initialize tray icon (quit callback will be set in run())
+        self.tray = None
 
         # Initialize notification system
         notify2.init("WhisperKey")
@@ -108,6 +112,9 @@ class WhisperKey:
         """Handle shutdown signals by stopping recording and cleaning up."""
         if self.is_recording:
             self.stop_recording()
+
+        if self.tray:
+            self.tray.stop()
 
         self.recording_complete = True
         self.file_handler.remove_pid_file()
@@ -189,12 +196,8 @@ class WhisperKey:
         self.recording_thread.daemon = True
         self.recording_thread.start()
 
-        show_notification(
-            "Recording Started",
-            "Press Ctrl+Alt+G to stop recording",
-            "audio-input-microphone",
-            urgency=notify2.URGENCY_NORMAL
-        )
+        if self.tray:
+            self.tray.set_recording()
         print("Recording started. Press Ctrl+Alt+G to stop.")
 
     def _record_audio(self):
@@ -219,12 +222,6 @@ class WhisperKey:
         # If we reach the time limit
         if self.is_recording:
             self.stop_recording()
-            show_notification(
-                "Recording Stopped",
-                f"Time limit of {self.audio_config.RECORD_SECONDS} seconds reached",
-                "dialog-information",
-                urgency=notify2.URGENCY_LOW
-            )
 
     def stop_recording(self):
         """Stop the current recording, save the file, and transcribe it."""
@@ -249,6 +246,8 @@ class WhisperKey:
         filename = self.file_handler.save_recording(
             self.frames, self.audio, self.audio_config)
         if not filename:
+            if self.tray:
+                self.tray.set_idle()
             show_notification(
                 "Error",
                 "Failed to save recording",
@@ -259,17 +258,14 @@ class WhisperKey:
 
         print("Recording stopped. Processing transcription...")
 
-        # Notify user that processing/transcription is starting
-        show_notification(
-            "Processing Audio",
-            "We are processing the audio",
-            "system-run",
-            urgency=notify2.URGENCY_LOW
-        )
+        if self.tray:
+            self.tray.set_processing()
 
         # Transcribe the recording
         transcription = self.transcribe_audio(filename)
         if not transcription:
+            if self.tray:
+                self.tray.set_idle()
             show_notification(
                 "Error",
                 "Failed to transcribe recording",
@@ -281,12 +277,8 @@ class WhisperKey:
         pyperclip.copy(transcription)
         print("Transcription copied to clipboard!")
 
-        show_notification(
-            "Recording Completed",
-            "The transcription has been copied to your clipboard",
-            "emblem-ok",
-            urgency=notify2.URGENCY_NORMAL
-        )
+        if self.tray:
+            self.tray.set_success()
 
     def toggle_recording(self):
         """Toggle recording state."""
@@ -301,6 +293,10 @@ class WhisperKey:
         # Create PID file to indicate this process is running
         self.file_handler.create_pid_file()
 
+        # Set up and start the tray icon
+        self.tray = TrayIcon(quit_callback=lambda: self._signal_handler(signal.SIGTERM, None))
+        self.tray.start()
+
         # Set up keyboard listener
         self.keyboard_handler = KeyboardHandler(self.toggle_recording)
         keyboard_setup_success = self.keyboard_handler.setup_keyboard_listener()
@@ -312,15 +308,8 @@ class WhisperKey:
                 "dialog-error",
                 urgency=notify2.URGENCY_CRITICAL
             )
+            self.tray.stop()
             return
-
-        # Inform the user about the shortcut
-        show_notification(
-            "WhisperKey Active",
-            "Press Ctrl+Alt+G to start/stop recording",
-            "dialog-information",
-            urgency=notify2.URGENCY_LOW
-        )
 
         print("WhisperKey is running in the background.")
         print("Press Ctrl+Alt+G to start/stop recording.")
@@ -334,6 +323,8 @@ class WhisperKey:
         finally:
             if self.is_recording:
                 self.stop_recording()
+            if self.tray:
+                self.tray.stop()
             self.file_handler.remove_pid_file()
 
 
