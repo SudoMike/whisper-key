@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime
+import logging
 import pyaudio
 import wave
 import os
@@ -13,6 +14,8 @@ import argparse
 from typing import Optional, Tuple
 from pynput import keyboard
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 from whisperkey.keyboard_handler import KeyboardHandler
 from whisperkey.utils import show_notification, suppress_stderr
 from whisperkey.file_handler import FileHandler
@@ -23,10 +26,16 @@ from whisperkey.tray_icon import TrayIcon
 class WhisperKey:
     """A class that handles audio recording and transcription using OpenAI's Whisper API."""
 
-    def __init__(self, device_name: Optional[str] = None, device_index: Optional[int] = None):
+    def __init__(
+        self,
+        device_name: Optional[str] = None,
+        device_index: Optional[int] = None,
+        keep_audio: bool = False,
+    ):
         """Initialize the WhisperKey application."""
         self.file_handler = FileHandler()
         self.audio_config = AUDIO_CONFIG
+        self.keep_audio = keep_audio
 
         # Preferred input device (overridable by env)
         self.preferred_device_name = (
@@ -88,10 +97,10 @@ class WhisperKey:
                 if info.get("maxInputChannels", 0) > 0:
                     return self.preferred_device_index, info
                 else:
-                    print(
+                    logger.warning(
                         f"Requested device index {self.preferred_device_index} has no input channels. Ignoring.")
             except Exception as e:
-                print(
+                logger.warning(
                     f"Invalid input device index {self.preferred_device_index}: {e}")
 
         # 2) If name provided, find by case-insensitive substring
@@ -102,7 +111,7 @@ class WhisperKey:
                     info = p.get_device_info_by_index(i)
                 if info.get("maxInputChannels", 0) > 0 and name_lower in str(info.get("name", "")).lower():
                     return i, info
-            print(
+            logger.warning(
                 f"No input device matched name '{self.preferred_device_name}'. Using default.")
 
         # 3) Fallback: None means use default device
@@ -131,17 +140,17 @@ class WhisperKey:
                     language="en",
                 )
 
-            print(transcription)
+            logger.info(f"Transcription: {transcription}")
             return transcription
 
         except Exception as e:
-            print(f"Transcription error: {e}")
+            logger.warning(f"Transcription error: {e}")
             return None
 
     def start_recording(self):
         """Start recording audio in a separate thread."""
         if self.is_recording:
-            print("Already recording!")
+            logger.info("Already recording!")
             return
 
         # Clear previous recording data
@@ -167,24 +176,25 @@ class WhisperKey:
             max_channels = int(selected_info.get(
                 "maxInputChannels", self.audio_config.CHANNELS))
             if self.audio_config.CHANNELS > max_channels:
-                print(
+                logger.info(
                     f"Requested channels {self.audio_config.CHANNELS} exceed device capability {max_channels}. Using {max_channels}.")
                 open_kwargs["channels"] = max_channels
 
         if selected_index is not None:
             open_kwargs["input_device_index"] = selected_index
-            print(
-                f"Using input device [{selected_index}]: {selected_info.get('name')} | rate={self.audio_config.RATE} | channels={open_kwargs['channels']}")
+            # Always show which device is being used
+            logger.warning(
+                f"Using input device [{selected_index}]: {selected_info.get('name')}")
         else:
-            # Print default device info for visibility
+            # Always show which device is being used
             try:
                 with suppress_stderr():
                     default_info = self.audio.get_default_input_device_info()
-                print(
-                    f"Using default input device: {default_info.get('name')} | rate={self.audio_config.RATE} | channels={open_kwargs['channels']}")
+                logger.warning(
+                    f"Using default input device: {default_info.get('name')}")
             except Exception:
-                print(
-                    "No default input device info available. Attempting to open stream with defaults.")
+                logger.warning(
+                    "Using system default input device")
 
         with suppress_stderr():
             self.stream = self.audio.open(**open_kwargs)
@@ -198,7 +208,7 @@ class WhisperKey:
 
         if self.tray:
             self.tray.set_recording()
-        print("Recording started. Press Ctrl+Alt+G to stop.")
+        logger.info("Recording started. Press Ctrl+Alt+G to stop.")
 
     def _record_audio(self):
         """Record audio until stopped or time limit reached."""
@@ -216,7 +226,7 @@ class WhisperKey:
                     self.audio_config.CHUNK, exception_on_overflow=False)
                 self.frames.append(data)
             except Exception as e:
-                print(f"Error recording audio: {e}")
+                logger.warning(f"Error recording audio: {e}")
                 break
 
         # If we reach the time limit
@@ -226,7 +236,7 @@ class WhisperKey:
     def stop_recording(self):
         """Stop the current recording, save the file, and transcribe it."""
         if not self.is_recording:
-            print("Not currently recording!")
+            logger.info("Not currently recording!")
             return
 
         self.is_recording = False
@@ -256,13 +266,21 @@ class WhisperKey:
             )
             return
 
-        print("Recording stopped. Processing transcription...")
+        logger.info("Recording stopped. Processing transcription...")
 
         if self.tray:
             self.tray.set_processing()
 
         # Transcribe the recording
         transcription = self.transcribe_audio(filename)
+
+        # Clean up audio file unless --keep-audio was specified
+        if not self.keep_audio and filename and os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+
         if not transcription:
             if self.tray:
                 self.tray.set_idle()
@@ -275,7 +293,7 @@ class WhisperKey:
             return
 
         pyperclip.copy(transcription)
-        print("Transcription copied to clipboard!")
+        logger.warning("Transcription successful")
 
         if self.tray:
             self.tray.set_success()
@@ -311,8 +329,7 @@ class WhisperKey:
             self.tray.stop()
             return
 
-        print("WhisperKey is running in the background.")
-        print("Press Ctrl+Alt+G to start/stop recording.")
+        logger.warning("WhisperKey is running. Press Ctrl+Alt+G to start/stop recording.")
 
         # Keep the main thread alive
         try:
@@ -366,6 +383,10 @@ def _parse_args():
                         help="Number of channels, overrides config")
     parser.add_argument("--record-seconds", type=int, default=None,
                         help="Time limit per recording in seconds")
+    parser.add_argument("--keep-audio", action="store_true",
+                        help="Keep audio files after transcription (default: delete)")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Enable detailed logging (default: only show device and success messages)")
     return parser.parse_args()
 
 
@@ -373,12 +394,23 @@ def main():
     """Main entry point for the application."""
     args = _parse_args()
 
+    # Configure logging based on verbosity
+    log_level = logging.INFO if args.verbose else logging.WARNING
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     if args.list_devices:
         _print_devices()
         return
 
-    whisperkey = WhisperKey(device_name=args.device,
-                            device_index=args.device_index)
+    whisperkey = WhisperKey(
+        device_name=args.device,
+        device_index=args.device_index,
+        keep_audio=args.keep_audio,
+    )
 
     # Apply CLI overrides to audio configuration
     if args.rate is not None:

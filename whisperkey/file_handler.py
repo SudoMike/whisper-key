@@ -1,8 +1,11 @@
+import logging
 import os
 import datetime
 import appdirs
 import wave
 from whisperkey.config import APP_NAME, AudioConfig
+
+logger = logging.getLogger(__name__)
 
 
 class FileHandler:
@@ -35,14 +38,14 @@ class FileHandler:
         try:
             """Save the recorded frames to a WAV file."""
             if not frames:
-                print("No audio data to save")
+                logger.warning("No audio data to save")
                 return None
 
             # Generate a timestamped filename with full path
             filename = os.path.join(self.get_cache_dir(),
                                     datetime.datetime.now().strftime("recording_%Y%m%d_%H%M%S.wav"))
 
-            print("Saving to", filename)
+            logger.info(f"Saving to {filename}")
             with wave.open(filename, 'wb') as wf:
                 wf.setnchannels(audio_config.CHANNELS)
                 wf.setsampwidth(audio.get_sample_size(audio_config.FORMAT))
@@ -52,5 +55,5 @@ class FileHandler:
                 return filename
 
         except Exception as e:
-            print(f"Error saving recording: {e}")
+            logger.warning(f"Error saving recording: {e}")
             return None
