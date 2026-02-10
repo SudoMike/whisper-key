@@ -56,6 +56,10 @@ class WhisperKey:
         self.stream = None
         self.recording_complete = False
 
+        # In-memory history of transcripts for tray menu
+        # Each entry: {"timestamp": datetime.datetime, "text": str}
+        self.transcripts: list[dict] = []
+
         # Initialize OpenAI client
         self.client = OpenAI()
 
@@ -178,6 +182,56 @@ class WhisperKey:
         except Exception as e:
             logger.warning(f"Cleanup transcription error: {e}")
             return None
+
+    # ---------------------------
+    # Transcript history helpers
+    # ---------------------------
+    def _add_transcript_to_history(self, transcript: str):
+        """Store a transcript in memory for later access via the tray icon."""
+        try:
+            entry = {
+                "timestamp": datetime.datetime.now(),
+                "text": transcript,
+            }
+            self.transcripts.append(entry)
+        except Exception:
+            # History is best-effort only; never fail the main flow
+            pass
+
+    def get_transcripts(self) -> list[dict]:
+        """Return the list of stored transcript entries."""
+        return self.transcripts
+
+    def copy_transcript_from_history(self, index: int, cleanup: bool = False):
+        """Copy a previous transcript to the clipboard, optionally cleaned up first.
+
+        This is used by the tray icon menu callbacks.
+        """
+        try:
+            if index < 0 or index >= len(self.transcripts):
+                return
+
+            raw_text = self.transcripts[index].get("text", "")
+            if not raw_text:
+                return
+
+            if cleanup:
+                cleaned = self.cleanup_transcript(raw_text)
+                text_to_copy = cleaned if cleaned else raw_text
+            else:
+                text_to_copy = raw_text
+
+            pyperclip.copy(text_to_copy)
+            logger.warning(
+                "Copied %s transcript from history",
+                "cleaned" if cleanup else "raw",
+            )
+
+            if self.tray:
+                # Reuse the existing success feedback on the tray icon
+                self.tray.set_success()
+        except Exception as e:
+            logger.warning(f"Error copying transcript from history: {e}")
 
     def start_recording(self):
         """Start recording audio in a separate thread."""
@@ -324,6 +378,9 @@ class WhisperKey:
             )
             return
 
+        # Add transcript to in-memory history for tray access
+        self._add_transcript_to_history(transcription)
+
         # Optionally post-process the transcript with an LLM when cleanup_mode is enabled
         if self.cleanup_mode:
             cleaned = self.cleanup_transcript(transcription)
@@ -369,8 +426,12 @@ class WhisperKey:
         # Create PID file to indicate this process is running
         self.file_handler.create_pid_file()
 
-        # Set up and start the tray icon
-        self.tray = TrayIcon(quit_callback=lambda: self._signal_handler(signal.SIGTERM, None))
+        # Set up and start the tray icon, wiring transcript history callbacks
+        self.tray = TrayIcon(
+            quit_callback=lambda: self._signal_handler(signal.SIGTERM, None),
+            get_transcripts=self.get_transcripts,
+            copy_transcript=self.copy_transcript_from_history,
+        )
         self.tray.start()
 
         # Set up keyboard listener

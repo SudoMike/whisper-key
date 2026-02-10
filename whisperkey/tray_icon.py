@@ -16,13 +16,25 @@ class TrayIcon:
 
     ICON_SIZE = 22  # Standard system tray icon size
 
-    def __init__(self, quit_callback: Callable[[], None]):
+    # History / menu configuration
+    MAX_TRANSCRIPTS_IN_MENU = 20
+    PREVIEW_WORDS = 12
+
+    def __init__(
+        self,
+        quit_callback: Callable[[], None],
+        get_transcripts: Optional[Callable[[], list]] = None,
+        copy_transcript: Optional[Callable[[int, bool], None]] = None,
+    ):
         """Initialize the tray icon.
 
         Args:
             quit_callback: Function to call when user clicks Quit in menu.
         """
         self._quit_callback = quit_callback
+        self._get_transcripts = get_transcripts
+        # Signature: (index, cleanup: bool) -> None
+        self._copy_transcript = copy_transcript
         self._icon: Optional[pystray.Icon] = None
         self._icon_thread: Optional[threading.Thread] = None
         self._success_timer: Optional[threading.Timer] = None
@@ -54,13 +66,108 @@ class TrayIcon:
 
         return img
 
+    def _first_n_words(self, text: str, n: int) -> str:
+        """Return the first N words of text with ellipsis if truncated."""
+        words = text.split()
+        if len(words) <= n:
+            return text
+        return " ".join(words[:n]) + "..."
+
+    def _make_copy_handler(self, index: int, cleanup: bool):
+        """Create a menu callback that copies the selected transcript."""
+
+        def handler(icon, item):
+            if self._copy_transcript is not None:
+                self._copy_transcript(index, cleanup)
+
+        return handler
+
     def _create_menu(self) -> pystray.Menu:
-        """Create the right-click context menu."""
-        return pystray.Menu(
+        """Create the tray menu, including recent transcripts."""
+        items = [
             pystray.MenuItem("WhisperKey", None, enabled=False),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Quit", self._on_quit),
+        ]
+
+        # Build recent transcripts submenu if a provider is available
+        if self._get_transcripts is not None:
+            transcripts = self._get_transcripts() or []
+
+            if transcripts:
+                transcript_items = []
+
+                # Only show at most MAX_TRANSCRIPTS_IN_MENU, newest first
+                start = max(0, len(transcripts) - self.MAX_TRANSCRIPTS_IN_MENU)
+                indices = list(range(start, len(transcripts)))
+                indices.reverse()  # Newest first
+
+                for idx in indices:
+                    entry = transcripts[idx]
+                    text = entry.get("text", "")
+                    timestamp = entry.get("timestamp")
+
+                    if timestamp is not None:
+                        try:
+                            label_time = timestamp.strftime("%H:%M:%S")
+                        except Exception:
+                            label_time = str(timestamp)
+                    else:
+                        label_time = ""
+
+                    preview = self._first_n_words(text, self.PREVIEW_WORDS)
+                    if label_time:
+                        label = f"{label_time} - {preview}"
+                    else:
+                        label = preview or "(empty transcript)"
+
+                    # Each transcript entry has a submenu with Copy and Cleanup & Copy
+                    transcript_items.append(
+                        pystray.MenuItem(
+                            label,
+                            pystray.Menu(
+                                pystray.MenuItem(
+                                    "Copy",
+                                    self._make_copy_handler(idx, cleanup=False),
+                                ),
+                                pystray.MenuItem(
+                                    "Cleanup & Copy",
+                                    self._make_copy_handler(idx, cleanup=True),
+                                ),
+                            ),
+                        )
+                    )
+
+                # Add the "Recent transcripts" parent item
+                items.extend(
+                    [
+                        pystray.Menu.SEPARATOR,
+                        pystray.MenuItem(
+                            "Recent transcripts",
+                            pystray.Menu(*transcript_items),
+                        ),
+                    ]
+                )
+            else:
+                # No transcripts yet; show a disabled placeholder item
+                items.extend(
+                    [
+                        pystray.Menu.SEPARATOR,
+                        pystray.MenuItem(
+                            "No transcripts yet",
+                            None,
+                            enabled=False,
+                        ),
+                    ]
+                )
+
+        # Always end with a separator and Quit
+        items.extend(
+            [
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Quit", self._on_quit),
+            ]
         )
+
+        return pystray.Menu(*items)
 
     def _on_quit(self, icon, item):
         """Handle quit menu item click."""
@@ -92,6 +199,15 @@ class TrayIcon:
         if self._icon is not None:
             self._icon.stop()
             self._icon = None
+
+    def refresh_menu(self):
+        """Rebuild the tray menu, e.g., after transcripts change."""
+        if self._icon is not None:
+            self._icon.menu = self._create_menu()
+            # Some backends expose update_menu; guard for safety
+            update_menu = getattr(self._icon, "update_menu", None)
+            if callable(update_menu):
+                update_menu()
 
     def _cancel_success_timer(self):
         """Cancel any pending success-to-idle timer."""
