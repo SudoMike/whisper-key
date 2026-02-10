@@ -49,6 +49,7 @@ class WhisperKey:
 
         # Recording state
         self.is_recording = False
+        self.cleanup_mode = False
         self.recording_thread = None
         self.frames = []
         self.audio = None
@@ -145,6 +146,37 @@ class WhisperKey:
 
         except Exception as e:
             logger.warning(f"Transcription error: {e}")
+            return None
+
+    def cleanup_transcript(self, transcript: str) -> str | None:
+        """Use an LLM to clean up the transcript into well-written prose."""
+        try:
+            model = "gpt-5"
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a writing assistant. Rewrite the user's spoken "
+                            "transcript as clear, concise, well-structured prose. "
+                            "Preserve all of the important points and meaning, but "
+                            "remove filler words (ums, ahs, like, you know, etc.), "
+                            "stutters, and obvious rambling. Organize the result into "
+                            "paragraphs as needed so it reads like deliberate writing."
+                        ),
+                    },
+                    {"role": "user", "content": transcript},
+                ]
+            )
+
+            cleaned = response.choices[0].message.content if response.choices else None
+            if cleaned:
+                cleaned = cleaned.strip()
+            logger.info("Cleanup transcription completed via LLM")
+            return cleaned
+        except Exception as e:
+            logger.warning(f"Cleanup transcription error: {e}")
             return None
 
     def start_recording(self):
@@ -292,8 +324,24 @@ class WhisperKey:
             )
             return
 
-        pyperclip.copy(transcription)
-        logger.warning("Transcription successful")
+        # Optionally post-process the transcript with an LLM when cleanup_mode is enabled
+        if self.cleanup_mode:
+            cleaned = self.cleanup_transcript(transcription)
+            if cleaned:
+                pyperclip.copy(cleaned)
+                logger.warning("Cleaned transcription successful")
+            else:
+                # Fallback to raw transcription if cleanup fails
+                pyperclip.copy(transcription)
+                logger.warning(
+                    "Cleanup transcription failed or returned empty; using raw transcription"
+                )
+        else:
+            pyperclip.copy(transcription)
+            logger.warning("Transcription successful")
+
+        # Reset cleanup mode after handling this recording
+        self.cleanup_mode = False
 
         if self.tray:
             self.tray.set_success()
@@ -303,6 +351,16 @@ class WhisperKey:
         if self.is_recording:
             self.stop_recording()
         else:
+            # Standard transcription (no cleanup)
+            self.cleanup_mode = False
+            self.start_recording()
+
+    def toggle_recording_cleanup(self):
+        """Toggle recording state for cleanup mode (LLM-processed transcript)."""
+        if self.is_recording:
+            self.stop_recording()
+        else:
+            self.cleanup_mode = True
             self.start_recording()
 
     def run(self):
@@ -316,7 +374,9 @@ class WhisperKey:
         self.tray.start()
 
         # Set up keyboard listener
-        self.keyboard_handler = KeyboardHandler(self.toggle_recording)
+        self.keyboard_handler = KeyboardHandler(
+            self.toggle_recording, self.toggle_recording_cleanup
+        )
         keyboard_setup_success = self.keyboard_handler.setup_keyboard_listener()
 
         if not keyboard_setup_success:
@@ -329,7 +389,9 @@ class WhisperKey:
             self.tray.stop()
             return
 
-        logger.warning("WhisperKey is running. Press Ctrl+Alt+G to start/stop recording.")
+        logger.warning(
+            "WhisperKey is running. Press Ctrl+Alt+G for standard or Ctrl+Alt+F for cleaned transcription."
+        )
 
         # Keep the main thread alive
         try:

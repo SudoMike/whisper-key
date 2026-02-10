@@ -8,7 +8,7 @@
 
 ## ✨ Features
 
-- 🔑 **Global Hotkey**: Start/stop recording with Ctrl+Alt+G from anywhere on your system
+- 🔑 **Global Hotkeys**: Start/stop standard recording with Ctrl+Alt+G or cleaned (LLM-processed) recording with Ctrl+Alt+F from anywhere on your system
 - 📋 **Clipboard Integration**: Automatically copies transcriptions to your clipboard
 - 🔒 **Privacy-Focused**: Audio recordings are stored temporarily in your local cache
 
@@ -50,9 +50,9 @@ For permanent configuration, add this to your shell profile file (`.bashrc`, `.z
    whisperkey
    ```
 
-2. Press **Ctrl+Alt+G** to start recording
+2. Press **Ctrl+Alt+G** to start a standard recording, or **Ctrl+Alt+F** to start a cleaned (LLM-processed) recording
 
-3. Press **Ctrl+Alt+G** again to stop recording
+3. Press the same hotkey again (**Ctrl+Alt+G** or **Ctrl+Alt+F**) to stop recording
 
 4. The transcription will be processed and automatically copied to your clipboard
 
