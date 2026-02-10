@@ -8,11 +8,18 @@ import signal
 import sys
 import time
 import pyperclip
-import notify2
 import threading
 import argparse
 from typing import Optional, Tuple
 from openai import OpenAI
+
+# Set up GLib as the D-Bus mainloop BEFORE anything touches dbus.SessionBus()
+# (e.g. notify2.init). The shared SessionBus is cached on first use, so the
+# mainloop must be attached before that happens.
+from dbus.mainloop.glib import DBusGMainLoop
+DBusGMainLoop(set_as_default=True)
+
+import notify2  # noqa: E402 – must come after DBusGMainLoop setup
 
 logger = logging.getLogger(__name__)
 from whisperkey.keyboard_handler import KeyboardHandler
@@ -425,11 +432,9 @@ class WhisperKey:
         # Create PID file to indicate this process is running
         self.file_handler.create_pid_file()
 
-        # Set up and start the tray icon, wiring transcript history callbacks
+        # Set up and start the tray icon
         self.tray = TrayIcon(
             quit_callback=lambda: self._signal_handler(signal.SIGTERM, None),
-            get_transcripts=self.get_transcripts,
-            copy_transcript=self.copy_transcript_from_history,
         )
         self.tray.start()
 

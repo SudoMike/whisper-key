@@ -18,6 +18,10 @@
 
 - Python 3.12 or higher
 - OpenAI API key
+- System packages for D-Bus and GObject introspection (Ubuntu/Debian):
+  ```bash
+  sudo apt install python3-gi gir1.2-glib-2.0 libdbus-1-dev libgirepository1.0-dev
+  ```
 
 ### Using pip
 
@@ -30,6 +34,7 @@ pip install whisperkey
 ```bash
 git clone https://github.com/Danielratmiroff/whisper-key.git
 cd whisper-key
+uv venv --system-site-packages  # Required so the venv can access python3-gi
 uv sync  # Install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
