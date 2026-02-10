@@ -12,7 +12,6 @@ import notify2
 import threading
 import argparse
 from typing import Optional, Tuple
-from pynput import keyboard
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
