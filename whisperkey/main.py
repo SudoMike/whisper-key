@@ -7,6 +7,9 @@ import os
 import signal
 import sys
 import time
+import tty
+import termios
+import select
 import pyperclip
 import threading
 import argparse
@@ -409,6 +412,116 @@ class WhisperKey:
         if self.tray:
             self.tray.set_success()
 
+    # ---------------------------
+    # Terminal history menu
+    # ---------------------------
+    def _getch_nonblocking(self, timeout=0.5):
+        """Read a single character from stdin with timeout. Returns None on timeout."""
+        rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+        if rlist:
+            return sys.stdin.read(1)
+        return None
+
+    def _terminal_loop(self):
+        """Interactive terminal loop handling H for history menu."""
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            # Patch all log handlers to use \r\n so output isn't garbled in raw mode
+            for handler in logging.root.handlers:
+                handler.terminator = '\r\n'
+            while True:
+                ch = self._getch_nonblocking(0.5)
+                if ch is None:
+                    continue
+                if ch in ('h', 'H'):
+                    self._history_menu(fd)
+                elif ch == '\x03':  # Ctrl+C
+                    break
+        finally:
+            for handler in logging.root.handlers:
+                handler.terminator = '\n'
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    def _print_raw(self, text):
+        """Print text in raw terminal mode (convert \\n to \\r\\n)."""
+        sys.stdout.write(text.replace('\n', '\r\n'))
+        sys.stdout.flush()
+
+    def _history_menu(self, fd):
+        """Show history menu and handle selection."""
+        while True:
+            # Show last 9 transcripts
+            recent = self.transcripts[-9:] if self.transcripts else []
+            if not recent:
+                self._print_raw("\n--- History (empty) ---\n")
+                self._print_raw("Press ESC to go back.\n")
+            else:
+                self._print_raw("\n--- History Menu ---\n")
+                for i, entry in enumerate(recent):
+                    words = entry["text"].split()
+                    preview = " ".join(words[:15])
+                    if len(words) > 15:
+                        preview += "..."
+                    self._print_raw(f"  {i + 1}) {preview}\n")
+                self._print_raw("\nPress 1-{} to select, ESC to go back.\n".format(len(recent)))
+
+            ch = self._getch_nonblocking(30)
+            if ch is None:
+                continue
+            if ch == '\x1b':  # ESC
+                self._print_raw("\n")
+                return
+            if ch == '\x03':  # Ctrl+C
+                return
+            if recent and ch.isdigit() and 1 <= int(ch) <= len(recent):
+                selected_idx = int(ch) - 1
+                # Convert to absolute index in self.transcripts
+                abs_idx = len(self.transcripts) - len(recent) + selected_idx
+                result = self._copy_method_menu(abs_idx)
+                if result == 'done':
+                    # Copied successfully, exit history
+                    return
+
+    def _copy_method_menu(self, transcript_index):
+        """Show copy method selection. Returns 'done' if copied, 'back' if ESC."""
+        entry = self.transcripts[transcript_index]
+        words = entry["text"].split()
+        preview = " ".join(words[:15])
+        if len(words) > 15:
+            preview += "..."
+
+        self._print_raw(f"\nSelected: {preview}\n")
+        self._print_raw("(c)opy transcript or (i)mproved transcript? (ESC to go back)\n")
+
+        while True:
+            ch = self._getch_nonblocking(30)
+            if ch is None:
+                continue
+            if ch == '\x1b':  # ESC
+                return 'back'
+            if ch == '\x03':  # Ctrl+C
+                return 'back'
+            if ch in ('c', 'C'):
+                pyperclip.copy(entry["text"])
+                self._print_raw("Copied verbatim transcript to clipboard.\n")
+                if self.tray:
+                    self.tray.set_success()
+                return 'done'
+            if ch in ('i', 'I'):
+                self._print_raw("Improving transcript...\n")
+                cleaned = self.cleanup_transcript(entry["text"])
+                if cleaned:
+                    pyperclip.copy(cleaned)
+                    self._print_raw("Copied improved transcript to clipboard.\n")
+                else:
+                    pyperclip.copy(entry["text"])
+                    self._print_raw("Improvement failed; copied verbatim transcript.\n")
+                if self.tray:
+                    self.tray.set_success()
+                return 'done'
+
     def toggle_recording(self):
         """Toggle recording state."""
         if self.is_recording:
@@ -457,11 +570,11 @@ class WhisperKey:
         logger.warning(
             "WhisperKey is running. Press Ctrl+Alt+G for standard or Ctrl+Alt+F for cleaned transcription."
         )
+        logger.warning("Press H in this terminal for transcript history.")
 
-        # Keep the main thread alive
+        # Run interactive terminal loop
         try:
-            while True:
-                time.sleep(1)
+            self._terminal_loop()
         except KeyboardInterrupt:
             self._signal_handler(signal.SIGINT, None)
         finally:
