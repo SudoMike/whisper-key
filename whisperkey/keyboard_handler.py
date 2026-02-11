@@ -37,6 +37,7 @@ class KeyboardHandler:
         self._pressed: set[int] = set()
         self._threads: list[threading.Thread] = []
         self._running = False
+        self._combo_fired = False  # prevents re-firing while combo is held
 
     # ------------------------------------------------------------------
     # Public API
@@ -173,14 +174,15 @@ class KeyboardHandler:
                 key_event = categorize(event)
                 code = self._normalise(event.code)
 
-                if key_event.keystate in (
-                    key_event.key_down,
-                    key_event.key_hold,
-                ):
+                if key_event.keystate == key_event.key_down:
                     self._pressed.add(code)
                     self._check_combos()
+                elif key_event.keystate == key_event.key_hold:
+                    self._pressed.add(code)
+                    # Don't re-check combos on hold/repeat
                 elif key_event.keystate == key_event.key_up:
                     self._pressed.discard(code)
+                    self._combo_fired = False
         except OSError:
             # Device disconnected – happens e.g. on USB unplug; just exit quietly.
             logger.info("Device %s disconnected", dev_path)
@@ -192,10 +194,14 @@ class KeyboardHandler:
 
     def _check_combos(self):
         """Check whether a registered key combo is currently held."""
+        if self._combo_fired:
+            return
         if self.START_STOP_KEYS.issubset(self._pressed):
+            self._combo_fired = True
             self.toggle_recording_callback()
         elif (
             self.toggle_recording_cleanup_callback
             and self.CLEANUP_KEYS.issubset(self._pressed)
         ):
+            self._combo_fired = True
             self.toggle_recording_cleanup_callback()
