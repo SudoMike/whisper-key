@@ -189,17 +189,23 @@ class WhisperKey:
                     {
                         "role": "system",
                         "content": (
-                            "You are a transcript cleanup tool. Your ONLY job is to "
-                            "rewrite the user's spoken transcript as clear, concise, "
-                            "well-structured prose. Output ONLY the cleaned text — no "
-                            "preamble, no commentary, no explanations, no quotes around "
-                            "it. Preserve all important points and meaning, but remove "
-                            "filler words (ums, ahs, like, you know, etc.), stutters, "
-                            "and obvious rambling. Organize into paragraphs as needed "
-                            "so it reads like deliberate writing."
+                            "You are a transcript cleanup tool. You receive raw speech "
+                            "transcripts and output ONLY the cleaned version. Never "
+                            "respond conversationally. Never add commentary, preamble, "
+                            "or explanations. Just output the cleaned text."
                         ),
                     },
-                    {"role": "user", "content": transcript},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Clean up the following speech transcript. Remove filler "
+                            "words (um, uh, like, you know), stutters, false starts, "
+                            "and rambling. Produce clear, concise, well-structured "
+                            "prose that preserves all important meaning. Output ONLY "
+                            "the cleaned text, nothing else.\n\n"
+                            f"TRANSCRIPT:\n{transcript}"
+                        ),
+                    },
                 ]
             )
 
@@ -473,7 +479,7 @@ class WhisperKey:
         """Show history menu and handle selection."""
         while True:
             # Show last 9 transcripts
-            recent = self.transcripts[-9:] if self.transcripts else []
+            recent = list(reversed(self.transcripts[-9:])) if self.transcripts else []
             if not recent:
                 self._print_raw("\n--- History (empty) ---\n")
                 self._print_raw("Press ESC to go back.\n")
@@ -497,8 +503,8 @@ class WhisperKey:
                 return
             if recent and ch.isdigit() and 1 <= int(ch) <= len(recent):
                 selected_idx = int(ch) - 1
-                # Convert to absolute index in self.transcripts
-                abs_idx = len(self.transcripts) - len(recent) + selected_idx
+                # Convert to absolute index in self.transcripts (recent is reversed, so map back)
+                abs_idx = len(self.transcripts) - 1 - selected_idx
                 result = self._copy_method_menu(abs_idx)
                 if result == 'done':
                     # Copied successfully, exit history
