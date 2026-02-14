@@ -40,6 +40,7 @@ class WhisperKey:
         device_name: Optional[str] = None,
         device_index: Optional[int] = None,
         keep_audio: bool = False,
+        use_openai: bool = False,
     ):
         """Initialize the WhisperKey application."""
         self.file_handler = FileHandler()
@@ -69,8 +70,26 @@ class WhisperKey:
         # Each entry: {"timestamp": datetime.datetime, "text": str}
         self.transcripts: list[dict] = []
 
-        # Initialize OpenAI client
-        self.client = OpenAI()
+        # Initialize API clients
+        if use_openai:
+            self.client = OpenAI()
+            self.transcription_client = self.client
+            self.transcription_model = "whisper-1"
+            self.chat_model = "gpt-5"
+            logger.warning("Using OpenAI for all API calls")
+        else:
+            groq_api_key = os.getenv("GROQ_API_KEY")
+            if not groq_api_key:
+                logger.error("GROQ_API_KEY not set. Set it or use --openai.")
+                sys.exit(1)
+            self.client = OpenAI(
+                api_key=groq_api_key,
+                base_url="https://api.groq.com/openai/v1",
+            )
+            self.transcription_client = self.client
+            self.transcription_model = "whisper-large-v3"
+            self.chat_model = "llama-3.3-70b-versatile"
+            logger.warning("Using Groq for all API calls")
 
         # Initialize tray icon (quit callback will be set in run())
         self.tray = None
@@ -147,8 +166,8 @@ class WhisperKey:
         """Transcribe the audio file using OpenAI's Whisper API."""
         try:
             with open(filename, "rb") as audio_file:
-                transcription = self.client.audio.transcriptions.create(
-                    model="whisper-1",
+                transcription = self.transcription_client.audio.transcriptions.create(
+                    model=self.transcription_model,
                     file=audio_file,
                     response_format="text",
                     language="en",
@@ -164,9 +183,8 @@ class WhisperKey:
     def cleanup_transcript(self, transcript: str) -> str | None:
         """Use an LLM to clean up the transcript into well-written prose."""
         try:
-            model = "gpt-5"
             response = self.client.chat.completions.create(
-                model=model,
+                model=self.chat_model,
                 messages=[
                     {
                         "role": "system",
@@ -625,6 +643,8 @@ def _parse_args():
                         help="Time limit per recording in seconds")
     parser.add_argument("--keep-audio", action="store_true",
                         help="Keep audio files after transcription (default: delete)")
+    parser.add_argument("--openai", action="store_true",
+                        help="Use OpenAI for transcription and cleanup (default: Groq)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Enable detailed logging (default: only show device and success messages)")
     return parser.parse_args()
@@ -650,6 +670,7 @@ def main():
         device_name=args.device,
         device_index=args.device_index,
         keep_audio=args.keep_audio,
+        use_openai=args.openai,
     )
 
     # Apply CLI overrides to audio configuration
