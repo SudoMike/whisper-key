@@ -545,18 +545,19 @@ class WhisperKey:
     def toggle_recording(self):
         """Toggle recording state."""
         if self.is_recording:
+            # Final key determines mode: Ctrl+Alt+G = raw transcription
+            self.cleanup_mode = False
             self.stop_recording()
         else:
-            # Standard transcription (no cleanup)
-            self.cleanup_mode = False
             self.start_recording()
 
     def toggle_recording_cleanup(self):
         """Toggle recording state for cleanup mode (LLM-processed transcript)."""
         if self.is_recording:
+            # Final key determines mode: Ctrl+Alt+F = cleanup transcription
+            self.cleanup_mode = True
             self.stop_recording()
         else:
-            self.cleanup_mode = True
             self.start_recording()
 
     def run(self):
