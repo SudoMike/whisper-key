@@ -189,12 +189,14 @@ class WhisperKey:
                     {
                         "role": "system",
                         "content": (
-                            "You are a writing assistant. Rewrite the user's spoken "
-                            "transcript as clear, concise, well-structured prose. "
-                            "Preserve all of the important points and meaning, but "
-                            "remove filler words (ums, ahs, like, you know, etc.), "
-                            "stutters, and obvious rambling. Organize the result into "
-                            "paragraphs as needed so it reads like deliberate writing."
+                            "You are a transcript cleanup tool. Your ONLY job is to "
+                            "rewrite the user's spoken transcript as clear, concise, "
+                            "well-structured prose. Output ONLY the cleaned text — no "
+                            "preamble, no commentary, no explanations, no quotes around "
+                            "it. Preserve all important points and meaning, but remove "
+                            "filler words (ums, ahs, like, you know, etc.), stutters, "
+                            "and obvious rambling. Organize into paragraphs as needed "
+                            "so it reads like deliberate writing."
                         ),
                     },
                     {"role": "user", "content": transcript},
